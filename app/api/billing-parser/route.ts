@@ -7,6 +7,10 @@ import {
 	streamText,
 	createUIMessageStream,
 	UIMessageStreamWriter,
+	UIMessage,
+	UIMessagePart,
+	UIDataTypes,
+	UITools,
 } from "ai";
 import { devToolsMiddleware } from "@ai-sdk/devtools";
 import { existsSync, readFileSync } from "node:fs";
@@ -19,54 +23,43 @@ const model = wrapLanguageModel({
 	middleware: devToolsMiddleware(),
 });
 
+const documentId = crypto.randomUUID();
+
+type MyUIPart = UIMessagePart<UIDataTypes, UITools>;
+
 const uploadDir = path.resolve("uploads");
 export async function POST(req: Request) {
 	try {
 		const form = await req.json();
-		const result = form.messages[0].parts;
-		const fileObjects:
-			| { type: "text"; text: string }
-			| { type: "file"; mediaType: string; data: string }[] = [];
-
-		const textParts = result.filter(
-			(item: { type: string; text?: string }) => typeof item.text === "string",
-		);
-		fileObjects.push(...textParts);
-
-		const fileParts = result.filter((item: { type: string; mediaType: string; url: string }) => {
-			return (
-				item.type === "file" && typeof item.url === "string" && typeof item.mediaType === "string"
-			);
-		});
 
 		if (!existsSync(uploadDir)) {
 			throw new Error("Directory does not exist");
 		}
 
-		for (const file of fileParts) {
-			if (!existsSync(file.url)) {
-				throw new Error("Image does not exist");
-			}
-			console.log("fileURL", file.url);
-			const fileBuffer = readFileSync(file.url);
-			fileObjects.push({
-				type: "file",
-				mediaType: inferMime(file.url),
-				data: fileBuffer.toString("base64"),
-			});
-		}
+		const messages = form.messages.map((msg: UIMessage) => ({
+			role: msg.role,
+			content: msg.parts.map((part: MyUIPart) => {
+				if (part.type === "text") {
+					return { type: "text", text: part.text };
+				}
+
+				if (part.type === "file") {
+					const fileBuffer = readFileSync(part.url);
+					return {
+						type: "file",
+						mediaType: inferMime(part.url),
+						data: fileBuffer.toString("base64"),
+					};
+				}
+			}),
+		}));
 
 		return createUIMessageStreamResponse({
 			stream: createUIMessageStream({
 				execute: async ({ writer }: { writer: UIMessageStreamWriter }) => {
 					const result = streamText({
 						model,
-						messages: [
-							{
-								role: "user",
-								content: fileObjects,
-							},
-						],
+						messages,
 						tools: tools({ writer }),
 						system: `
 You are a document processing agent.
@@ -92,13 +85,34 @@ Rules:
 						}),
 					});
 
+					for await (const partial of result.partialOutputStream) {
+						writer.write({
+							id: documentId,
+							type: "data-document-agent",
+							data: {
+								status: "streaming",
+								document: partial,
+							},
+						});
+					}
+					const final = await result.output;
+
+					writer.write({
+						id: documentId,
+						type: "data-document-agent",
+						data: {
+							status: "done",
+							document: final,
+						},
+					});
 					writer.merge(result.toUIMessageStream());
 				},
+
 				onError: (error) => `Custom error: ${Error.isError(error)}`,
 			}),
 		});
 	} catch (error) {
-		console.log(error instanceof Error ? error.message : "Unknown error");
+		console.log(Error.isError(error) ?? "Unknown error");
 		return new Response(JSON.stringify({ error: "Internal Server Error" }), { status: 500 });
 	}
 }

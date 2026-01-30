@@ -26,7 +26,6 @@ export default function BillingParserClient() {
 		transport: new DefaultChatTransport({
 			api: "/api/billing-parser",
 		}),
-
 		onError: (error) => {
 			setUiError(error.message);
 		},
@@ -95,12 +94,18 @@ export default function BillingParserClient() {
 	return (
 		<main className="px-6">
 			<div className="max-w-2xl mx-auto">
-				<div className="mt-6 mb-20 space-y-4">
+				<div className="mt-10 mb-60 space-y-4">
 					{messages.map((message) => (
 						<div key={message.id} className="space-y-2">
 							{message.parts.map((part, i) => {
-								const hasText = message.parts.some((p) => p.type === "text");
-								if (hasText && part.type.startsWith("data-")) {
+								const hasDocuments = message.parts.some((p) => p.type === "data-document-agent");
+
+								if (
+									hasDocuments &&
+									(part.type === "data-started" ||
+										part.type === "data-delta" ||
+										part.type === "data-finished")
+								) {
 									return null;
 								}
 								switch (part.type) {
@@ -133,23 +138,25 @@ export default function BillingParserClient() {
 											</div>
 										);
 									}
-									case "text": {
-										let parsedData: OutputType | null = null;
+									case "data-document-agent": {
+										const { status, document } = part.data as {
+											status: "streaming" | "done";
+											document?: Partial<OutputType>;
+										};
 
-										try {
-											parsedData = JSON.parse(part.text);
-										} catch {
-											return null;
-										}
-										if (!parsedData?.classification || !Array.isArray(parsedData.classification)) {
+										if (!document?.classification || !Array.isArray(document.classification)) {
 											return null;
 										}
 
 										return (
 											<div key={i} className="space-y-4">
-												{parsedData.classification.map((item, idx: number) => (
-													<DocumentCard key={idx} item={item} />
+												{document.classification.map((item, idx) => (
+													<DocumentCard key={idx} item={item as Item} />
 												))}
+
+												{status === "streaming" && (
+													<p className="text-xs text-gray-400">Processing…</p>
+												)}
 											</div>
 										);
 									}
@@ -159,21 +166,7 @@ export default function BillingParserClient() {
 							})}
 						</div>
 					))}
-				</div>
-				<div className="space-y-4">
-					{status && (
-						<div>
-							<h3>Status</h3>
-							<pre>{status}</pre>
-						</div>
-					)}
-
-					{uiError && (
-						<div>
-							<h3>Error</h3>
-							<pre>{uiError}</pre>
-						</div>
-					)}
+					<div className="space-y-4">{uiError && <pre>{uiError}</pre>} </div>
 				</div>
 
 				<div
@@ -313,7 +306,7 @@ function formatStep(data: ToolEvent): ToolStep | null {
 	return null;
 }
 
-function DocumentCard({ item }: { item: Item }) {
+function DocumentCard({ item }: { item: Partial<Item> }) {
 	const { classification, fields } = item;
 
 	return (
@@ -324,17 +317,17 @@ function DocumentCard({ item }: { item: Item }) {
 			</div>
 
 			<div className="space-y-2">
-				<Field label="Invoice Number" value={fields.invoiceNumber} />
-				<Field label="Due Date" value={fields.dueDate} />
-				<Field label="Total Amount" value={fields.totalAmount} />
-				<Field label="Amount Paid" value={fields.totalPaid} />
-				<Field label="Payment Method" value={fields.paymentMethod} />
+				<Field label="Invoice Number" value={fields?.invoiceNumber} />
+				<Field label="Due Date" value={fields?.dueDate} />
+				<Field label="Total Amount" value={fields?.totalAmount} />
+				<Field label="Amount Paid" value={fields?.totalPaid} />
+				<Field label="Payment Method" value={fields?.paymentMethod} />
 			</div>
 
-			{fields.rawTextPreview && (
+			{fields?.rawTextPreview && (
 				<details className="text-xs text-gray-500">
 					<summary className="cursor-pointer">View extracted text</summary>
-					<p className="mt-2 whitespace-pre-wrap">{fields.rawTextPreview}</p>
+					<p className="mt-2 whitespace-pre-wrap">{fields?.rawTextPreview}</p>
 				</details>
 			)}
 		</div>
