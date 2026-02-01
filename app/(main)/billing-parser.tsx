@@ -2,7 +2,7 @@
 
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
-import { Paperclip, Send, X } from "lucide-react";
+import { Loader, Paperclip, Send, Square, X } from "lucide-react";
 import { useRef, useState } from "react";
 import pdfIcon from "@/file-formats/pdf.svg";
 import docIcon from "@/file-formats/doc.svg";
@@ -22,7 +22,7 @@ const fileIcon: Record<string, StaticImageData> = {
 };
 
 export default function BillingParserClient() {
-	const { messages, sendMessage, setMessages, status } = useChat({
+	const { messages, sendMessage, setMessages, status, stop } = useChat({
 		transport: new DefaultChatTransport({
 			api: "/api/billing-parser",
 		}),
@@ -32,7 +32,6 @@ export default function BillingParserClient() {
 	});
 
 	const [files, setFiles] = useState<File[]>([]);
-	const [prompt, setPrompt] = useState("");
 	const [uploadError, setUploadError] = useState("");
 	const [uiError, setUiError] = useState("");
 	const fileRef = useRef<HTMLInputElement>(null);
@@ -74,18 +73,11 @@ export default function BillingParserClient() {
 				});
 			}
 		}
-		if (prompt) {
-			messageParts.push({
-				type: "text" as const,
-				text: prompt,
-			});
-		}
 
 		if (messageParts.length > 0) {
 			sendMessage({ parts: messageParts });
 			setFiles([]);
 			setUiError("");
-			setPrompt("");
 			if (fileRef.current) {
 				fileRef.current.value = "";
 			}
@@ -213,12 +205,6 @@ export default function BillingParserClient() {
 						})}
 					</div>
 
-					<textarea
-						className="flex-1 field-sizing-content resize-none focus:outline-none"
-						ref={(el) => el?.focus()}
-						value={prompt}
-						onChange={(e) => setPrompt(e.target.value)}
-					></textarea>
 					<div className="flex w-full justify-between">
 						<label
 							htmlFor="file"
@@ -238,19 +224,26 @@ export default function BillingParserClient() {
 							type="file"
 							id="file"
 							ref={fileRef}
-							className="sr-only"
+							className="sr-only disabled:cursor-not-allowed"
 							onChange={(e) => {
 								setFiles((prev) => prev && [...prev, ...(e.target.files ?? [])]);
 							}}
+							disabled={status === "streaming" || status === "submitted"}
 							multiple
 						/>
 
 						<button
-							disabled={status === "streaming"}
+							disabled={status === "submitted"}
+							onClick={status === "streaming" ? stop : handleSubmit}
 							className="bg-gray-800 text-white p-2 rounded-[8px] cursor-pointer focus:outline-none focus:ring-2 focus:ring-gray-800/25 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
-							onClick={handleSubmit}
 						>
-							<Send className="size-4" />
+							{status === "submitted" ? (
+								<Loader className="size-4 animate-spin" />
+							) : status === "streaming" ? (
+								<Square className="size-4" />
+							) : (
+								<Send className="size-4" />
+							)}
 						</button>
 					</div>
 				</div>

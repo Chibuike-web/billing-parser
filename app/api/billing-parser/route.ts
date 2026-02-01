@@ -23,12 +23,13 @@ const model = wrapLanguageModel({
 	middleware: devToolsMiddleware(),
 });
 
-const documentId = crypto.randomUUID();
-
 type MyUIPart = UIMessagePart<UIDataTypes, UITools>;
 
 const uploadDir = path.resolve("uploads");
+
 export async function POST(req: Request) {
+	const documentId = crypto.randomUUID();
+
 	try {
 		const form = await req.json();
 
@@ -39,14 +40,12 @@ export async function POST(req: Request) {
 		const messages = form.messages.map((msg: UIMessage) => ({
 			role: msg.role,
 			content: msg.parts.map((part: MyUIPart) => {
-				if (part.type === "text") {
-					return { type: "text", text: part.text };
-				}
-
 				if (part.type === "file") {
 					const fileBuffer = readFileSync(part.url);
 					return {
 						type: "file",
+						fileId: `file-${part.url}`,
+						fileName: path.basename(part.url),
 						mediaType: inferMime(part.url),
 						data: fileBuffer.toString("base64"),
 					};
@@ -105,14 +104,22 @@ Rules:
 							document: final,
 						},
 					});
-					writer.merge(result.toUIMessageStream());
 				},
 
-				onError: (error) => `Custom error: ${Error.isError(error)}`,
+				onError: (error) => {
+					if (Error.isError(error)) {
+						return `${error.message}`;
+					}
+					return "Unknown error";
+				},
 			}),
 		});
 	} catch (error) {
-		console.log(Error.isError(error) ?? "Unknown error");
+		if (Error.isError(error)) {
+			console.error(error.message, error.stack);
+		} else {
+			console.error("Unknown error", error);
+		}
 		return new Response(JSON.stringify({ error: "Internal Server Error" }), { status: 500 });
 	}
 }
