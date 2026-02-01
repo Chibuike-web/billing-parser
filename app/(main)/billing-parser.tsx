@@ -84,9 +84,9 @@ export default function BillingParserClient() {
 		}
 	};
 	return (
-		<main className="px-6">
-			<div className="max-w-2xl mx-auto">
-				<div className="mt-10 mb-60 space-y-4">
+		<main className="px-6 flex flex-col h-dvh">
+			{messages.length > 0 && (
+				<div className="mt-10 mb-60 space-y-4 max-w-2xl mx-auto w-full">
 					{messages.map((message) => (
 						<div key={message.id} className="space-y-2">
 							{message.parts.map((part, i) => {
@@ -160,51 +160,54 @@ export default function BillingParserClient() {
 					))}
 					<div className="space-y-4">{uiError && <pre>{uiError}</pre>} </div>
 				</div>
+			)}
 
+			<div className="h-full flex items-center justify-center w-full">
 				<div
 					className={cn(
-						"border border-gray-200 bg-white rounded-[18px] p-4 gap-2  flex flex-col mt-20",
-						messages.length > 0 && "fixed bottom-10 max-w-2xl w-full",
+						"border border-gray-200 bg-white rounded-[18px] p-4 gap-2 flex flex-col w-full max-w-2xl",
+						messages.length > 0 && "fixed bottom-10 mt-20 w-[calc(100%-48px)]",
 					)}
 				>
-					<div className="flex gap-2 flex-wrap">
-						{files?.map((file) => {
-							const ext = file.name.split(".").pop()?.toLowerCase() as string;
-							return (
-								<div
-									key={file.name}
-									className="flex items-center gap-2 px-2 py-2 border border-gray-200 rounded-[12px] relative"
-								>
-									<div className="flex gap-2 items-center w-full max-w-[270px]">
-										<Image
-											src={fileIcon[ext].src}
-											className="size-8"
-											alt=""
-											width={32}
-											height={32}
-										/>
-										<div className="overflow-hidden">
-											<p className="truncate text-sm">{file.name}</p>
-											<p className="text-xs text-gray-500">
-												{file.type.split("/")[1].toUpperCase()}
-											</p>
-										</div>
-									</div>
-									<button
-										className="absolute right-1 top-1"
-										onClick={() =>
-											setFiles((prev) => prev && prev?.filter((f) => f.name !== file.name))
-										}
+					{files.length > 0 && (
+						<div className="flex gap-2 flex-wrap">
+							{files?.map((file) => {
+								const ext = file.name.split(".").pop()?.toLowerCase() as string;
+								return (
+									<div
+										key={file.name}
+										className="flex items-center gap-2 px-2 py-2 border border-gray-200 rounded-[12px] relative"
 									>
-										<span className="size-4 flex items-center justify-center cursor-pointer bg-gray-800 rounded-full">
-											<X className="size-3 text-white" />
-										</span>
-									</button>
-								</div>
-							);
-						})}
-					</div>
-
+										<div className="flex gap-2 items-center w-full max-w-[270px]">
+											<Image
+												src={fileIcon[ext].src}
+												className="size-8"
+												alt=""
+												width={32}
+												height={32}
+											/>
+											<div className="overflow-hidden">
+												<p className="truncate text-sm">{file.name}</p>
+												<p className="text-xs text-gray-500">
+													{file.type.split("/")[1].toUpperCase()}
+												</p>
+											</div>
+										</div>
+										<button
+											className="absolute right-1 top-1"
+											onClick={() =>
+												setFiles((prev) => prev && prev?.filter((f) => f.name !== file.name))
+											}
+										>
+											<span className="size-4 flex items-center justify-center cursor-pointer bg-gray-800 rounded-full">
+												<X className="size-3 text-white" />
+											</span>
+										</button>
+									</div>
+								);
+							})}
+						</div>
+					)}
 					<div className="flex w-full justify-between">
 						<label
 							htmlFor="file"
@@ -247,8 +250,8 @@ export default function BillingParserClient() {
 						</button>
 					</div>
 				</div>
-				{uploadError && <p className="text-red-500">{uploadError}</p>}
 			</div>
+			{uploadError && <p className="text-red-500">{uploadError}</p>}
 		</main>
 	);
 }
