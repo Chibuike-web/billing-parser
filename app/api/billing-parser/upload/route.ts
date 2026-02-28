@@ -1,3 +1,4 @@
+import { UploadedFiles } from "@/app/(main)/types";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
@@ -11,11 +12,7 @@ export async function POST(req: Request) {
 		const form = await req.formData();
 		const files = form.getAll("file");
 
-		const uploadedFiles: {
-			url: string;
-			mediaType: string;
-			name: string;
-		}[] = [];
+		const uploadedFiles: UploadedFiles[] = [];
 
 		for (const file of files) {
 			if (!(file instanceof File)) {
@@ -27,6 +24,7 @@ export async function POST(req: Request) {
 			const savePath = path.join(uploadDir, file.name);
 			writeFileSync(savePath, buffer);
 			uploadedFiles.push({
+				id: crypto.randomUUID(),
 				name: file.name,
 				mediaType: file.type,
 				url: `uploads/${file.name}`,
@@ -39,7 +37,7 @@ export async function POST(req: Request) {
 				message: "Files successfully uploaded",
 				files: uploadedFiles,
 			}),
-			{ status: 200 }
+			{ status: 200 },
 		);
 	} catch (error) {
 		console.error(error);

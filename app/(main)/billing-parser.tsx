@@ -3,7 +3,7 @@
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import { Loader, Paperclip, Send, Square, X } from "lucide-react";
-import { useRef, useState } from "react";
+import { ChangeEvent, startTransition, useOptimistic, useRef, useState } from "react";
 import pdfIcon from "@/file-formats/pdf.svg";
 import docIcon from "@/file-formats/doc.svg";
 import jpgIcon from "@/file-formats/jpg.svg";
@@ -12,6 +12,7 @@ import Image, { StaticImageData } from "next/image";
 import { cn } from "@/lib/cn";
 import { OutputType } from "@/lib/schemas/output-schema";
 import { ToolEvent } from "../api/billing-parser/tools/types";
+import { UploadedFiles } from "./types";
 
 const fileIcon: Record<string, StaticImageData> = {
 	pdf: pdfIcon,
@@ -19,6 +20,12 @@ const fileIcon: Record<string, StaticImageData> = {
 	jpg: jpgIcon,
 	jpeg: jpgIcon,
 	png: pngIcon,
+};
+
+type FileItem = UploadedFiles & {
+	id: string;
+	size: number;
+	status: "uploading" | "completed" | "failed";
 };
 
 export default function BillingParserClient() {
@@ -31,62 +38,112 @@ export default function BillingParserClient() {
 		},
 	});
 
-	const [files, setFiles] = useState<File[]>([]);
+	const [files, setFiles] = useState<FileItem[]>([]);
 	const [uploadError, setUploadError] = useState("");
+	const [uploadedFiles, setUploadedFiles] = useState<UploadedFiles[]>([]);
+	const [optimisticFiles, setOptimisticFiles] = useOptimistic(files);
 	const [uiError, setUiError] = useState("");
 	const fileRef = useRef<HTMLInputElement>(null);
 
-	const handleSubmit = async () => {
-		setMessages([]);
-
-		if (!files.length && !prompt) {
-			setUploadError("");
+	const handleFileChange = async (e: ChangeEvent<HTMLInputElement>) => {
+		const lists = e.target.files;
+		if (!lists || lists.length === 0) {
+			setUploadError("Please select a valid file");
 			return;
 		}
-		let uploadedFiles: { url: string; mediaType: string }[] = [];
+		const browserFiles = Array.from(lists);
 
-		if (files.length) {
-			const formData = new FormData();
-			files.forEach((file) => formData.append("file", file));
+		const fileExtensions = browserFiles.map((file) => file.name.split(".").pop()?.toLowerCase());
+		const allowedTypes = ["pdf", "png", "jpg", "doc", "docx"];
 
-			const res = await fetch("/api/billing-parser/upload", {
-				method: "POST",
-				body: formData,
-			});
-
-			if (!res.ok) {
-				setUploadError("Unable to upload files");
+		for (const ext of fileExtensions) {
+			if (!ext || !allowedTypes.includes(ext)) {
+				alert("Invalid file type. Only PDF, PNG, JPG, DOCX and DOC are allowed.");
+				e.target.value = "";
 				return;
 			}
-
-			const data = await res.json();
-			uploadedFiles = data.files;
 		}
-		const messageParts = [];
 
-		if (files) {
-			for (const file of uploadedFiles) {
-				messageParts.push({
-					type: "file" as const,
-					mediaType: file.mediaType,
-					url: file.url,
+		const optimisticItems = browserFiles.map((f) => ({
+			id: crypto.randomUUID(),
+			name: f.name,
+			size: f.size,
+			status: "uploading",
+		})) as FileItem[];
+
+		startTransition(async () => {
+			setOptimisticFiles((prev) => [...prev, ...optimisticItems]);
+			e.target.value = "";
+
+			try {
+				if (!browserFiles.length) {
+					throw new Error("Select valid file");
+				}
+				const formData = new FormData();
+				browserFiles.forEach((f) => formData.append("file", f));
+
+				const res = await fetch("/api/billing-parser/upload", {
+					method: "POST",
+					body: formData,
+				});
+
+				const data = await res.json();
+				if (!res.ok) {
+					alert(data.error);
+					throw new Error("Issue uploading file");
+				}
+
+				await new Promise((r) => setTimeout(r, 2000));
+				startTransition(() => {
+					setFiles((prev) => [
+						...prev,
+						...data.files.map((f: UploadedFiles) => ({
+							...f,
+							status: "completed",
+						})),
+					]);
+					setUploadedFiles((prev) => [...prev, ...data.files]);
+				});
+			} catch {
+				alert("Upload failed");
+				startTransition(() => {
+					setOptimisticFiles((prev) =>
+						prev.map((f) => ({
+							...f,
+							status: "failed",
+						})),
+					);
 				});
 			}
+		});
+	};
+
+	const handleSubmit = async () => {
+		if (!uploadedFiles.length) return;
+
+		setMessages([]);
+
+		const messageParts = [];
+
+		for (const file of uploadedFiles) {
+			messageParts.push({
+				type: "file" as const,
+				mediaType: file.mediaType,
+				url: file.url,
+			});
 		}
 
 		if (messageParts.length > 0) {
 			sendMessage({ parts: messageParts });
 			setFiles([]);
 			setUiError("");
-			if (fileRef.current) {
-				fileRef.current.value = "";
-			}
+			if (fileRef.current) fileRef.current.value = "";
 		}
 	};
 	return (
 		<main className="px-6 flex flex-col h-dvh">
 			{messages.length > 0 && (
-				<div className="mt-10 mb-60 space-y-4 max-w-2xl mx-auto w-full">
+				<div className="mt-10 pb-40 space-y-4 max-w-2xl mx-auto w-full">
 					{messages.map((message) => (
 						<div key={message.id} className="space-y-2">
 							{message.parts.map((part, i) => {
@@ -169,14 +226,17 @@ export default function BillingParserClient() {
 						messages.length > 0 && "fixed bottom-10 mt-20 w-[calc(100%-48px)]",
 					)}
 				>
-					{files.length > 0 && (
+					{optimisticFiles.length > 0 && (
 						<div className="flex gap-2 flex-wrap">
-							{files?.map((file) => {
+							{optimisticFiles?.map((file) => {
 								const ext = file.name.split(".").pop()?.toLowerCase() as string;
 								return (
 									<div
-										key={file.name}
-										className="flex items-center gap-2 px-2 py-2 border border-gray-200 rounded-[12px] relative"
+										key={file.id}
+										className={cn(
+											"flex items-center gap-2 px-2 py-2 border border-gray-200 rounded-[12px] relative",
+											file.status === "uploading" && "opacity-50 cursor-not-allowed",
+										)}
 									>
 										<div className="flex gap-2 items-center w-full max-w-[270px]">
 											<Image
@@ -188,15 +248,21 @@ export default function BillingParserClient() {
 											/>
 											<div className="overflow-hidden">
 												<p className="truncate text-sm">{file.name}</p>
-												<p className="text-xs text-gray-500">
-													{file.type.split("/")[1].toUpperCase()}
-												</p>
+												<div className="flex items-center gap-1.5">
+													<p className="text-xs text-gray-500">{ext.toUpperCase()}</p>
+													{file.status === "uploading" && (
+														<p className="text-xs animate-pulse text-gray-500">Uploading....</p>
+													)}
+													{file.status === "completed" && (
+														<p className="text-xs text-green-500">Completed</p>
+													)}
+												</div>
 											</div>
 										</div>
 										<button
 											className="absolute right-1 top-1"
 											onClick={() =>
-												setFiles((prev) => prev && prev?.filter((f) => f.name !== file.name))
+												setFiles((prev) => prev && prev?.filter((f) => f.id !== file.id))
 											}
 										>
 											<span className="size-4 flex items-center justify-center cursor-pointer bg-gray-800 rounded-full">
@@ -228,9 +294,7 @@ export default function BillingParserClient() {
 							id="file"
 							ref={fileRef}
 							className="sr-only disabled:cursor-not-allowed"
-							onChange={(e) => {
-								setFiles((prev) => prev && [...prev, ...(e.target.files ?? [])]);
-							}}
+							onChange={handleFileChange}
 							disabled={status === "streaming" || status === "submitted"}
 							multiple
 						/>
