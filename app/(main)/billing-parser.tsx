@@ -40,30 +40,13 @@ export default function BillingParserClient() {
 
 	const [files, setFiles] = useState<FileItem[]>([]);
 	const [uploadError, setUploadError] = useState("");
-	const [uploadedFiles, setUploadedFiles] = useState<UploadedFiles[]>([]);
 	const [optimisticFiles, setOptimisticFiles] = useOptimistic(files);
 	const [uiError, setUiError] = useState("");
 	const fileRef = useRef<HTMLInputElement>(null);
+	const dropzoneRef = useRef<HTMLDivElement>(null);
+	const [active, setActive] = useState(false);
 
-	const handleFileChange = async (e: ChangeEvent<HTMLInputElement>) => {
-		const lists = e.target.files;
-		if (!lists || lists.length === 0) {
-			setUploadError("Please select a valid file");
-			return;
-		}
-		const browserFiles = Array.from(lists);
-
-		const fileExtensions = browserFiles.map((file) => file.name.split(".").pop()?.toLowerCase());
-		const allowedTypes = ["pdf", "png", "jpg", "doc", "docx"];
-
-		for (const ext of fileExtensions) {
-			if (!ext || !allowedTypes.includes(ext)) {
-				alert("Invalid file type. Only PDF, PNG, JPG, DOCX and DOC are allowed.");
-				e.target.value = "";
-				return;
-			}
-		}
-
+	const handleFiles = (browserFiles: File[]) => {
 		const optimisticItems = browserFiles.map((f) => ({
 			id: crypto.randomUUID(),
 			name: f.name,
@@ -73,7 +56,6 @@ export default function BillingParserClient() {
 
 		startTransition(async () => {
 			setOptimisticFiles((prev) => [...prev, ...optimisticItems]);
-			e.target.value = "";
 
 			try {
 				if (!browserFiles.length) {
@@ -102,7 +84,6 @@ export default function BillingParserClient() {
 							status: "completed",
 						})),
 					]);
-					setUploadedFiles((prev) => [...prev, ...data.files]);
 				});
 			} catch {
 				alert("Upload failed");
@@ -118,14 +99,41 @@ export default function BillingParserClient() {
 		});
 	};
 
+	const handleFileChange = async (e: ChangeEvent<HTMLInputElement>) => {
+		const lists = e.target.files;
+		if (!lists || lists.length === 0) {
+			setUploadError("Please select a valid file");
+			return;
+		}
+		const browserFiles = Array.from(lists);
+
+		const fileExtensions = browserFiles.map((file) => file.name.split(".").pop()?.toLowerCase());
+		const allowedTypes = ["pdf", "png", "jpg", "doc", "docx"];
+
+		for (const ext of fileExtensions) {
+			if (!ext || !allowedTypes.includes(ext)) {
+				alert("Invalid file type. Only PDF, PNG, JPG, DOCX and DOC are allowed.");
+				e.target.value = "";
+				return;
+			}
+		}
+
+		e.target.value = "";
+
+		handleFiles(browserFiles);
+	};
+
 	const handleSubmit = async () => {
-		if (!uploadedFiles.length) return;
+		if (!files.length) {
+			alert("Please upload at least one file");
+			return;
+		}
 
 		setMessages([]);
 
 		const messageParts = [];
 
-		for (const file of uploadedFiles) {
+		for (const file of files) {
 			messageParts.push({
 				type: "file" as const,
 				mediaType: file.mediaType,
@@ -140,8 +148,42 @@ export default function BillingParserClient() {
 			if (fileRef.current) fileRef.current.value = "";
 		}
 	};
+
 	return (
-		<main className="px-6 flex flex-col h-dvh">
+		<main
+			ref={dropzoneRef}
+			className="px-6 flex flex-col h-dvh"
+			onDragEnter={(e) => {
+				e.preventDefault();
+				setActive(true);
+			}}
+			onDragOver={(e) => {
+				e.preventDefault();
+				setActive(true);
+			}}
+			onDragLeave={(e) => {
+				e.preventDefault();
+				if (!dropzoneRef.current?.contains(e.relatedTarget as Node)) {
+					setActive(false);
+				}
+			}}
+			onDrop={(e) => {
+				e.preventDefault();
+				setActive(false);
+				handleFiles(Array.from(e.dataTransfer.files));
+			}}
+		>
+			<div
+				className={cn(
+					"fixed inset-0 w-screen h-screen flex items-center justify-center bg-white transition-opacity",
+					active ? "opacity-50" : "opacity-0 pointer-events-none",
+				)}
+			>
+				<div className="text-center">
+					<p className="text-lg font-medium text-gray-900">Drop files here</p>
+					<p className="text-sm text-gray-500 mt-1">PDF, PNG, JPG, DOC, DOCX</p>
+				</div>
+			</div>
 			{messages.length > 0 && (
 				<div className="mt-10 pb-40 space-y-4 max-w-2xl mx-auto w-full">
 					{messages.map((message) => (
@@ -230,22 +272,17 @@ export default function BillingParserClient() {
 						<div className="flex gap-2 flex-wrap">
 							{optimisticFiles?.map((file) => {
 								const ext = file.name.split(".").pop()?.toLowerCase() as string;
+								const icon = fileIcon[ext] ?? pdfIcon;
+
 								return (
 									<div
 										key={file.id}
 										className={cn(
 											"flex items-center gap-2 px-2 py-2 border border-gray-200 rounded-[12px] relative",
-											file.status === "uploading" && "opacity-50 cursor-not-allowed",
 										)}
 									>
 										<div className="flex gap-2 items-center w-full max-w-[270px]">
-											<Image
-												src={fileIcon[ext].src}
-												className="size-8"
-												alt=""
-												width={32}
-												height={32}
-											/>
+											<Image src={icon.src} className="size-8" alt="" width={32} height={32} />
 											<div className="overflow-hidden">
 												<p className="truncate text-sm">{file.name}</p>
 												<div className="flex items-center gap-1.5">
