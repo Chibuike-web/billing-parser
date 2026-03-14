@@ -19,7 +19,7 @@ import { tools } from "./tools";
 import { outputSchema } from "@/lib/schemas/output-schema";
 
 const model = wrapLanguageModel({
-	model: gateway("openai/gpt-5.2-chat-latest"),
+	model: gateway("anthropic/claude-haiku-4.5"),
 	middleware: devToolsMiddleware(),
 });
 
