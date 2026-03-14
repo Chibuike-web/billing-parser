@@ -3,7 +3,7 @@
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import { Loader, Paperclip, Send, Square, X } from "lucide-react";
-import { ChangeEvent, startTransition, useOptimistic, useRef, useState } from "react";
+import { ChangeEvent, startTransition, useRef, useState } from "react";
 import pdfIcon from "@/file-formats/pdf.svg";
 import docIcon from "@/file-formats/doc.svg";
 import jpgIcon from "@/file-formats/jpg.svg";
@@ -26,13 +26,12 @@ type FileItem = UploadedFiles & {
 	id: string;
 	size: number;
 	status: "uploading" | "completed" | "failed";
+	controller?: AbortController;
 };
 
 export default function BillingParserClient() {
 	const { messages, sendMessage, setMessages, status, stop } = useChat({
-		transport: new DefaultChatTransport({
-			api: "/api/billing-parser",
-		}),
+		transport: new DefaultChatTransport({ api: "/api/billing-parser" }),
 		onError: (error) => {
 			setUiError(error.message);
 		},
@@ -40,61 +39,64 @@ export default function BillingParserClient() {
 
 	const [files, setFiles] = useState<FileItem[]>([]);
 	const [uploadError, setUploadError] = useState("");
-	const [optimisticFiles, setOptimisticFiles] = useOptimistic(files);
 	const [uiError, setUiError] = useState("");
 	const fileRef = useRef<HTMLInputElement>(null);
 	const dropzoneRef = useRef<HTMLDivElement>(null);
 	const [active, setActive] = useState(false);
 
 	const handleFiles = (browserFiles: File[]) => {
-		const optimisticItems = browserFiles.map((f) => ({
-			id: crypto.randomUUID(),
-			name: f.name,
-			size: f.size,
-			status: "uploading",
-		})) as FileItem[];
+		const optimisticItems = browserFiles.map((f) => {
+			const controller = new AbortController();
 
-		startTransition(async () => {
-			setOptimisticFiles((prev) => [...prev, ...optimisticItems]);
+			return {
+				id: crypto.randomUUID(),
+				name: f.name,
+				size: f.size,
+				status: "uploading",
+				controller,
+			};
+		}) as FileItem[];
 
+		startTransition(() => {
+			setFiles((prev) => [...prev, ...optimisticItems]);
+		});
+
+		optimisticItems.forEach(async (optimistic, index) => {
+			const file = browserFiles[index];
+			const formData = new FormData();
+			formData.append("file", file);
 			try {
-				if (!browserFiles.length) {
-					throw new Error("Select valid file");
-				}
-				const formData = new FormData();
-				browserFiles.forEach((f) => formData.append("file", f));
-
 				const res = await fetch("/api/billing-parser/upload", {
 					method: "POST",
 					body: formData,
+					signal: optimistic.controller?.signal,
 				});
 
 				const data = await res.json();
 				if (!res.ok) {
-					alert(data.error);
 					throw new Error("Issue uploading file");
 				}
 
 				await new Promise((r) => setTimeout(r, 2000));
+
 				startTransition(() => {
-					setFiles((prev) => [
-						...prev,
-						...data.files.map((f: UploadedFiles) => ({
-							...f,
-							status: "completed",
-						})),
-					]);
-				});
-			} catch {
-				alert("Upload failed");
-				startTransition(() => {
-					setOptimisticFiles((prev) =>
-						prev.map((f) => ({
-							...f,
-							status: "failed",
-						})),
+					setFiles((prev: FileItem[]) =>
+						prev.map((f) =>
+							f.id === optimistic.id
+								? {
+										...f,
+										...data.file,
+										status: "completed",
+									}
+								: f,
+						),
 					);
 				});
+			} catch (error) {
+				if (Error.isError(error) && error.name === "AbortError") {
+					return;
+				}
+				setFiles((prev) => prev.filter((f) => f.id !== optimistic.id));
 			}
 		});
 	};
@@ -118,9 +120,8 @@ export default function BillingParserClient() {
 			}
 		}
 
-		e.target.value = "";
-
 		handleFiles(browserFiles);
+		e.target.value = "";
 	};
 
 	const handleSubmit = async () => {
@@ -148,7 +149,7 @@ export default function BillingParserClient() {
 			if (fileRef.current) fileRef.current.value = "";
 		}
 	};
-
+	const isUploading = files.some((f) => f.status === "uploading");
 	return (
 		<main
 			ref={dropzoneRef}
@@ -175,13 +176,13 @@ export default function BillingParserClient() {
 		>
 			<div
 				className={cn(
-					"fixed inset-0 w-screen h-screen flex items-center justify-center bg-white transition-opacity",
-					active ? "opacity-50" : "opacity-0 pointer-events-none",
+					"fixed inset-0 w-screen h-screen flex items-center justify-center bg-white/80 transition-opacity",
+					active ? "opacity-100" : "opacity-0 pointer-events-none",
 				)}
 			>
 				<div className="text-center">
 					<p className="text-lg font-medium text-gray-900">Drop files here</p>
-					<p className="text-sm text-gray-500 mt-1">PDF, PNG, JPG, DOC, DOCX</p>
+					<p className="text-base text-gray-500 mt-1">PDF, PNG, JPG, DOC, DOCX</p>
 				</div>
 			</div>
 			{messages.length > 0 && (
@@ -212,13 +213,14 @@ export default function BillingParserClient() {
 												className="flex items-start gap-3 rounded-[12px] border border-gray-200 bg-gray-50 px-3 py-2"
 											>
 												<span
-													className={`mt-1 size-2 rounded-full ${
+													className={cn(
+														"mt-1 size-2 rounded-full",
 														step.status === "done"
 															? "bg-emerald-500"
 															: step.status === "started"
 																? "bg-blue-500"
-																: "bg-amber-400"
-													}`}
+																: "bg-amber-400",
+													)}
 												/>
 												<div className="flex flex-col">
 													<p className="text-sm font-medium capitalize">
@@ -268,9 +270,9 @@ export default function BillingParserClient() {
 						messages.length > 0 && "fixed bottom-10 mt-20 w-[calc(100%-48px)]",
 					)}
 				>
-					{optimisticFiles.length > 0 && (
+					{files.length > 0 && (
 						<div className="flex gap-2 flex-wrap">
-							{optimisticFiles?.map((file) => {
+							{files?.map((file) => {
 								const ext = file.name.split(".").pop()?.toLowerCase() as string;
 								const icon = fileIcon[ext] ?? pdfIcon;
 
@@ -332,12 +334,12 @@ export default function BillingParserClient() {
 							ref={fileRef}
 							className="sr-only disabled:cursor-not-allowed"
 							onChange={handleFileChange}
-							disabled={status === "streaming" || status === "submitted"}
+							disabled={status === "streaming" || status === "submitted" || isUploading}
 							multiple
 						/>
 
 						<button
-							disabled={status === "submitted"}
+							disabled={status === "submitted" || isUploading}
 							onClick={status === "streaming" ? stop : handleSubmit}
 							className="bg-gray-800 text-white p-2 rounded-[8px] cursor-pointer focus:outline-none focus:ring-2 focus:ring-gray-800/25 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
 						>
