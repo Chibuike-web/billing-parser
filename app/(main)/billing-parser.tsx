@@ -85,7 +85,7 @@ export default function BillingParserClient() {
 							f.id === optimistic.id
 								? {
 										...f,
-										...data.file,
+										...data.files[0],
 										status: "completed",
 									}
 								: f,
